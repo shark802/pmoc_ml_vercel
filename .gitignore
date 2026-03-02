@@ -1,0 +1,52 @@
+# ML Model Directory - Deployed separately to Heroku
+# This folder has its own git repository and is deployed independently
+ml_model/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log
+tempCodeRunnerFile.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old ML model files in root (if any - these should be in ml_model)
+# Uncomment if you want to ignore these:
+# *.pkl
+
+# Cache directory
+cache/
+
+# Backup files
+backups/*.sql
+!backups/.gitkeep
+
+# Error logs
+error.txt
+
+# Environment variables (NEVER commit .env file)
+.env
+.env.local
+.env.*.local
+

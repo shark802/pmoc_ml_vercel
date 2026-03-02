@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<ruleset name="BCPDO Coding Standards">
+    <description>PHP CodeSniffer configuration for BCPDO System</description>
+    
+    <!-- Include the whole project -->
+    <file>.</file>
+    
+    <!-- Exclude vendor and cache directories -->
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/cache/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/dist/*</exclude-pattern>
+    <exclude-pattern>*/build/*</exclude-pattern>
+    <exclude-pattern>*/backups/*</exclude-pattern>
+    <exclude-pattern>*.min.js</exclude-pattern>
+    <exclude-pattern>*.min.css</exclude-pattern>
+    
+    <!-- Show progress -->
+    <arg value="p"/>
+    
+    <!-- Show colors -->
+    <arg name="colors"/>
+    
+    <!-- Show warnings -->
+    <arg value="w"/>
+    
+    <!-- Use PSR-12 coding standard as base -->
+    <rule ref="PSR12">
+        <!-- Allow longer lines for readability -->
+        <exclude name="Generic.Files.LineLength"/>
+    </rule>
+    
+    <!-- Additional rules -->
+    <rule ref="Generic.Arrays.DisallowLongArraySyntax"/>
+    <rule ref="Generic.Formatting.SpaceAfterNot"/>
+    <rule ref="Generic.NamingConventions.UpperCaseConstantName"/>
+    <rule ref="Generic.PHP.LowerCaseKeyword"/>
+    <rule ref="Generic.PHP.LowerCaseConstant"/>
+    <rule ref="Generic.Strings.UnnecessaryStringConcat"/>
+    <rule ref="Squiz.WhiteSpace.SuperfluousWhitespace"/>
+    
+    <!-- Allow short array syntax -->
+    <rule ref="Generic.Arrays.DisallowLongArraySyntax">
+        <severity>0</severity>
+    </rule>
+    
+    <!-- Ignore some warnings for now -->
+    <rule ref="PSR12.Files.FileHeader.SpacingAfterBlock">
+        <severity>0</severity>
+    </rule>
+    
+    <!-- Report width -->
+    <arg name="report-width" value="120"/>
+    
+    <!-- Report format -->
+    <arg name="report" value="full"/>
+</ruleset>
+
