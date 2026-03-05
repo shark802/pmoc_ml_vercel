@@ -53,8 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = filter_var(trim($_POST['email_address']), FILTER_SANITIZE_EMAIL);
     $position = trim($_POST['position']);
     
-    if (!preg_match('/^[a-zA-Z\s]+$/', $admin_name)) {
-        $response['message'] = 'Full name should only contain letters and spaces';
+    if (!preg_match('/^[a-zA-ZáéíóúñäëïöüàèìòùÁÉÍÓÚÑÄËÏÖÜÀÈÌÒÙ\s\-\']+$/', $admin_name)) {
+        $response['message'] = 'Full name should only contain letters, spaces, hyphens, or apostrophes';
         echo json_encode($response);
         exit();
     }

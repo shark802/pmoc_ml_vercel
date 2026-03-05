@@ -66,7 +66,7 @@ try {
     // Check if we're in production (pmoc.bccbsis.com) or local
     $isProduction = (strpos($host, 'pmoc.bccbsis.com') !== false || 
                      strpos($host, 'bccbsis.com') !== false);
-    $basePath = $isProduction ? '' : '/caps2';
+    $basePath = $isProduction ? '' : '/pmoc';
     
     $verificationUrl = $scheme . '://' . $host . $basePath . '/certificates/verify_certificate.php?' . $queryParam;
     

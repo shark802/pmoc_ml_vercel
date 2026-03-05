@@ -27,7 +27,6 @@ if (isset($_GET['admin_name'])) {
     ]);
     
     $stmt->close();
-    $conn->close();
 } else {
     echo json_encode([
         'exists' => false

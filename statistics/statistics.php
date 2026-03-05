@@ -1479,12 +1479,48 @@ $(function(){
   };
   const pyramidChart = makeChart('populationPyramidChart', {type:'bar', data:{labels:[],datasets:[]}, options:{maintainAspectRatio:false, responsive:true, indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:function(context){return context.dataset.label+': '+Math.abs(context.parsed.x).toLocaleString('en-US');}}}},scales:{x:{stacked:true,ticks:{callback:(v)=>Math.abs(v).toLocaleString('en-US'), stepSize: 10}},y:{stacked:true}}}});
   const civilChart = makeChart('civilChart', {type:'bar', data:{labels:[],datasets:[]}, options:{...commonBarOpts, indexAxis:'y'}});
+  // Ensure category names show on the y-axis for Civil Status
+  if (civilChart && civilChart.options && civilChart.options.scales && civilChart.options.scales.y) {
+    civilChart.options.scales.y.ticks.callback = function(value){
+      return civilChart.data && civilChart.data.labels && civilChart.data.labels.length
+        ? (civilChart.data.labels[value] ?? value)
+        : value;
+    };
+  }
   const religionChart = makeChart('religionChart', {type:'bar', data:{labels:[],datasets:[]}, options:{...commonBarOpts, indexAxis:'y'}});
+  if (religionChart && religionChart.options && religionChart.options.scales && religionChart.options.scales.y) {
+    religionChart.options.scales.y.ticks.callback = function(value){
+      return religionChart.data && religionChart.data.labels && religionChart.data.labels.length
+        ? (religionChart.data.labels[value] ?? value)
+        : value;
+    };
+  }
   const weddingChart = makeChart('weddingChart', {type:'bar', data:{labels:[],datasets:[]}, options:{...commonBarOpts, indexAxis:'y'}});
+  if (weddingChart && weddingChart.options && weddingChart.options.scales && weddingChart.options.scales.y) {
+    weddingChart.options.scales.y.ticks.callback = function(value){
+      return weddingChart.data && weddingChart.data.labels && weddingChart.data.labels.length
+        ? (weddingChart.data.labels[value] ?? value)
+        : value;
+    };
+  }
   const pregnancyStatusChart = makeChart('pregnancyStatusChart', {type:'doughnut', data:{labels:[],datasets:[]}, options:{maintainAspectRatio:false, responsive:true, plugins:{legend:{display:false}}, rotation: 0}}); // Start from 12 o'clock (top)
   const philhealthChart = makeChart('philhealthChart', {type:'doughnut', data:{labels:[],datasets:[]}, options:{maintainAspectRatio:false, responsive:true, plugins:{legend:{display:false}}, rotation: 0}}); // Start from 12 o'clock (top)
   const educationChart = makeChart('educationChart', {type:'bar', data:{labels:[],datasets:[]}, options:{...commonBarOpts, indexAxis:'y'}});
+  if (educationChart && educationChart.options && educationChart.options.scales && educationChart.options.scales.y) {
+    educationChart.options.scales.y.ticks.callback = function(value){
+      return educationChart.data && educationChart.data.labels && educationChart.data.labels.length
+        ? (educationChart.data.labels[value] ?? value)
+        : value;
+    };
+  }
   const employmentChart = makeChart('employmentChart', {type:'bar', data:{labels:[],datasets:[]}, options:{...commonBarOpts, indexAxis:'y'}});
+  if (employmentChart && employmentChart.options && employmentChart.options.scales && employmentChart.options.scales.y) {
+    employmentChart.options.scales.y.ticks.callback = function(value){
+      return employmentChart.data && employmentChart.data.labels && employmentChart.data.labels.length
+        ? (employmentChart.data.labels[value] ?? value)
+        : value;
+    };
+  }
   const incomeChart = makeChart('incomeChart', {type:'bar', data:{labels:[],datasets:[]}, options:commonBarOpts});
   const attendanceChart = makeChart('attendanceChart', {type:'doughnut', data:{labels:[],datasets:[]}, options:{maintainAspectRatio:false, responsive:true, plugins:{legend:{display:false}}, rotation: 0}}); // Start from 12 o'clock (top)
   const fpMethodsMaleChart = makeChart('fpMethodsMaleChart', {
@@ -4094,10 +4130,31 @@ $(function(){
     pyramidChart.data.labels=lbl;
     pyramidChart.data.datasets=[{label:'Male',data:m.map(v=>-v),backgroundColor:'rgba(0,102,204,0.7)'},{label:'Female',data:f,backgroundColor:'rgba(255,215,0,0.7)'}]; // Blue for Male, Gold for Female
     pyramidChart.update();
-    renderLegend('pyramidLegend', [
-      {text:'Male', color:'rgba(0,102,204,0.7)'}, // Blue
-      {text:'Female', color:'rgba(255,215,0,0.7)'} // Gold
-    ]);
+    const container = document.getElementById('pyramidLegend');
+    if (container) {
+      container.innerHTML = '';
+      const list = document.createElement('div');
+      list.className = 'legend-list';
+      lbl.forEach((age, i) => {
+        const row = document.createElement('div');
+        row.className = 'legend-item';
+        const maleSwatch = document.createElement('div');
+        maleSwatch.className = 'legend-color';
+        maleSwatch.style.backgroundColor = 'rgba(0,102,204,0.7)';
+        const maleText = document.createElement('span');
+        maleText.textContent = `${age}: ${Math.abs(Number(m[i])||0)} male`;
+        const spacer = document.createElement('span');
+        spacer.style.margin = '0 10px';
+        const femaleSwatch = document.createElement('div');
+        femaleSwatch.className = 'legend-color';
+        femaleSwatch.style.backgroundColor = 'rgba(255,215,0,0.7)';
+        const femaleText = document.createElement('span');
+        femaleText.textContent = `${age}: ${(Number(f[i])||0)} female`;
+        row.appendChild(maleSwatch); row.appendChild(maleText); row.appendChild(spacer); row.appendChild(femaleSwatch); row.appendChild(femaleText);
+        list.appendChild(row);
+      });
+      container.appendChild(list);
+    }
     
     // Render analysis for population pyramid
     if (data && data.labels && data.male && data.female) {
@@ -4822,30 +4879,107 @@ $(function(){
     
     window.printChart = function(chartId, title) {
       const canvas = document.getElementById(chartId);
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(`
+      const chart = Chart.getChart(chartId);
+      if (chart) { try { chart.resize(); chart.update(); } catch(e){} }
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+      const printDoc = iframe.contentDocument || iframe.contentWindow.document;
+      printDoc.open();
+      printDoc.write(`
         <html>
           <head>
             <title>${title}</title>
             <style>
-              body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
-              .chart-title { font-size: 1.5rem; margin-bottom: 20px; color: #007bff; }
-              .chart-container { margin: 20px 0; }
+              @page { size: A4; margin: 12mm; }
+              body{font-family:Arial,sans-serif;text-align:center;padding:20px;}
+              .chart-title{font-size:1.4rem;margin-bottom:12px;color:#007bff;}
+              .chart-container{margin:10px 0; page-break-inside: avoid;}
+              .chart-container img{max-width:100%; height:auto; max-height:420px;}
+              .legend{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:8px; page-break-inside: avoid;}
+              .legend-item{display:flex;align-items:center;margin:3px 6px; font-size:12px;}
+              .legend-age-grid{display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:6px; justify-items:center;}
+              @media print {
+                * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              }
             </style>
           </head>
           <body>
             <div class="chart-title">${title}</div>
-            <div class="chart-container">
-              <img src="${canvas.toDataURL()}" style="max-width: 100%; height: auto;">
-            </div>
-            <div style="margin-top: 20px; font-size: 0.9rem; color: #666;">
-              Printed on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-            </div>
+            <div class="chart-container"></div>
+            <div class="legend" id="print-legend"></div>
           </body>
         </html>
       `);
-      printWindow.document.close();
-      printWindow.print();
+      printDoc.close();
+      function buildLegend(){
+        const dst = printDoc.getElementById('print-legend');
+        if (!chart || !dst) return;
+        const datasets = chart.data.datasets || [];
+        // Special legend for population pyramid: show Male/Female with their dataset colors
+        if (chartId === 'populationPyramidChart' && datasets.length >= 2) {
+          const dsMale = datasets[0], dsFemale = datasets[1];
+          const maleColor = Array.isArray(dsMale.backgroundColor) ? dsMale.backgroundColor[0] : dsMale.backgroundColor;
+          const femaleColor = Array.isArray(dsFemale.backgroundColor) ? dsFemale.backgroundColor[0] : dsFemale.backgroundColor;
+          const labels = chart.data.labels || [];
+          const maleData = dsMale.data || [];
+          const femaleData = dsFemale.data || [];
+          const maleSwatch = `<svg width="12" height="12" style="margin-right:6px"><rect width="12" height="12" fill="${maleColor||'rgba(0,0,0,0.2)'}" stroke="rgba(0,0,0,0.2)"/></svg>`;
+          const femaleSwatch = `<svg width="12" height="12" style="margin-right:6px"><rect width="12" height="12" fill="${femaleColor||'rgba(0,0,0,0.2)'}" stroke="rgba(0,0,0,0.2)"/></svg>`;
+          const ageLines = labels.map((l,i)=>{
+            const m = Math.abs(Number(maleData[i])||0);
+            const f = Number(femaleData[i])||0;
+            return `
+              <div class="legend-item" style="justify-content:center;">
+                ${maleSwatch}<span>${l}: ${m} male</span>
+                <span style="margin:0 10px;"></span>
+                ${femaleSwatch}<span>${l}: ${f} female</span>
+              </div>
+            `;
+          }).join('');
+          dst.innerHTML = `<div class="legend-age-grid">${ageLines}</div>`;
+          return;
+        }
+        // Default legend: per-category with values and percentages
+        const labels = chart.data.labels || [];
+        const ds = datasets[0] || {};
+        const colors = ds.backgroundColor || [];
+        const values = ds.data || [];
+        const total = values.reduce((a,b)=>a+(Number(b)||0),0);
+        dst.innerHTML = labels.map((l,i)=>{
+          const color = Array.isArray(colors) ? colors[i] : colors;
+          const val = values[i] ?? 0;
+          const pct = total ? Math.round((val/total)*100) : 0;
+          const swatch = `<svg width="12" height="12" style="margin-right:6px"><rect width="12" height="12" fill="${color||'rgba(0,0,0,0.2)'}" stroke="rgba(0,0,0,0.2)"/></svg>`;
+          return `<div class="legend-item">${swatch}<span>${l}: ${val}${total?` (${pct}%)`:''}</span></div>`;
+        }).join('');
+      }
+      const img = new Image();
+      img.onload = function(){
+        const container = printDoc.querySelector('.chart-container');
+        if (container) container.appendChild(img);
+        buildLegend();
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(()=>{ try { document.body.removeChild(iframe); } catch(e){} }, 1000);
+      };
+      const kickoff = function(){
+        try {
+          img.src = canvas.toDataURL();
+        } catch(e) {
+          img.src = '';
+        }
+      };
+      if (chart) {
+        setTimeout(kickoff, chartId==='populationPyramidChart' ? 200 : 100);
+      } else {
+        kickoff();
+      }
     };
     
     // Export CSV from current chart data

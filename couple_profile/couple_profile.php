@@ -418,11 +418,14 @@ try {
 
     // Removed couple_sessions usage (no resume tracking)
 
-    // Update access record - mark profile as submitted and clear the selected flag
+    // Update access record - mark profile as submitted, clear the selected flag, and clear device binding
     $updateStmt = $conn->prepare("
         UPDATE couple_access 
         SET {$respondent}_profile_submitted = TRUE,
-            {$respondent}_selected = 0
+            {$respondent}_selected = 0,
+            {$respondent}_device_token_hash = NULL,
+            {$respondent}_device_bound_at = NULL,
+            {$respondent}_device_last_seen = NULL
         WHERE access_id = ?
     ");
     $updateStmt->bind_param("i", $access_id);
@@ -508,7 +511,7 @@ function sanitizeInput($input, $type)
 
     switch ($type) {
         case 'name':
-            return preg_replace('/[^a-zA-Z\s]/', '', $clean);
+            return preg_replace('/[^a-zA-ZáéíóúñäëïöüàèìòùÁÉÍÓÚÑÄËÏÖÜÀÈÌÒÙ\s\-\']/', '', $clean);
         case 'text':
             return htmlspecialchars($clean, ENT_QUOTES, 'UTF-8');
         case 'int':

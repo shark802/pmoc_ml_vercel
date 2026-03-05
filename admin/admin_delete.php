@@ -52,7 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $response['message'] = 'Error: ' . $e->getMessage();
     }
     
-    $conn->close();
     echo json_encode($response);
     exit();
 }

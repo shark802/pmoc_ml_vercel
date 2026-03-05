@@ -317,7 +317,6 @@ try {
     // Silently ignore review precompute errors
 }
 
-$conn->close();
 $storedResponses = $_SESSION['responses'][$respondent][$currentCategoryId] ?? [];
 ?>
 

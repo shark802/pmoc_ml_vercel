@@ -174,12 +174,18 @@ try {
         exit();
     }
 
-    // Device-bound enforcement
+    // Device-bound enforcement (only during active profile submission phase)
     $deviceToken = getDeviceTokenFromCookie();
     $partnerDeviceHashCol = $respondentType === 'male' ? 'male_device_token_hash' : 'female_device_token_hash';
     $partnerSelectedCol = $respondentType === 'male' ? 'male_selected' : 'female_selected';
 
-    if (!empty($accessData[$partnerDeviceHashCol])) {
+    // Only enforce device binding if a device hash is already bound AND profile hasn't been submitted yet
+    // If profile is not submitted, allow device switching (user is still in setup)
+    // If profile is submitted, check device binding to ensure subsequent accesses are from same device
+    $profileNotSubmitted = !$accessData["{$respondentType}_profile_submitted"];
+    
+    if (!empty($accessData[$partnerDeviceHashCol]) && !$profileNotSubmitted) {
+    	// Device binding enforcement only after profile is submitted
     	$storedHash = $accessData[$partnerDeviceHashCol];
     	$deviceOk = ($deviceToken && password_verify($deviceToken, $storedHash));
     	if (!$deviceOk) {
@@ -190,7 +196,7 @@ try {
     		]);
     		exit();
     	}
-    } else {
+    } else if (empty($accessData[$partnerDeviceHashCol])) {
     	// No device bound yet; if legacy selected lock exists and is fresh, still block until it expires
     	if ((int)$accessData[$partnerSelectedCol] === 1) {
     		$flagCheckStmt = $conn->prepare("

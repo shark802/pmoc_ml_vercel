@@ -17,8 +17,7 @@
                     <div class="form-group">
                         <label for="admin_name" class="required-field"> Admin Name</label>
                         <input type="text" class="form-control" id="admin_name" name="admin_name"
-                            pattern="^[a-zA-Z\s]*$"
-                            title="name should only contain letters and spaces" autocomplete="off"
+                            title="name should only contain letters, spaces, hyphens, or apostrophes" autocomplete="off"
                             required>
                         <div id="admin_nameFeedback" class="invalid-feedback"></div>
                     </div>
@@ -97,8 +96,7 @@
                     <div class="form-group">
                         <label for="edit_admin_name" class="required-field">Admin Name</label>
                         <input type="text" class="form-control" id="edit_admin_name" name="admin_name"
-                            pattern="^[a-zA-Z\s]*$"
-                            title="name should only contain letters and spaces" autocomplete="off"
+                            title="name should only contain letters, spaces, hyphens, or apostrophes" autocomplete="off"
                             required>
                         <div id="edit_admin_nameFeedback" class="invalid-feedback"></div>
                     </div>
@@ -367,7 +365,7 @@
         const admin_name = input.value.trim();
         const feedback = document.getElementById('edit_admin_nameFeedback');
         const original = $(input).data('original');
-        const regex = /^[a-zA-Z\s]+$/;
+        const regex = /^[a-zA-ZáéíóúñäëïöüàèìòùÁÉÍÓÚÑÄËÏÖÜÀÈÌÒÙ\s\-']+$/;
 
         if (admin_name === original) {
             input.classList.remove('is-valid', 'is-invalid');
@@ -378,7 +376,7 @@
         if (!regex.test(admin_name)) {
             input.classList.add('is-invalid');
             input.classList.remove('is-valid');
-            feedback.textContent = 'name should only contain letters and spaces';
+            feedback.textContent = 'name should only contain letters, spaces, hyphens, or apostrophes';
             return false;
         }
 

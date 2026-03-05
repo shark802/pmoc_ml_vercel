@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $original = $text;
         $text = trim($text);
         // Preserve ALL-CAPS inputs (only trim whitespace)
-        $lettersOnly = preg_replace('/[^A-Za-z]+/', '', $original);
+        $lettersOnly = preg_replace('/[^A-Za-záéíóúñäëïöüàèìòùÁÉÍÓÚÑÄËÏÖÜÀÈÌÒÙ]+/', '', $original);
         if ($lettersOnly !== '' && strtoupper($lettersOnly) === $lettersOnly) {
             return $text;
         }

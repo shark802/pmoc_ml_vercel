@@ -20,6 +20,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['get_admin'])) {
     }
 
     $stmt->close();
-    $conn->close();
 }
 ?>

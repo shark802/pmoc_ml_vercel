@@ -28,11 +28,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $raw_password = $_POST['password'];
     $position = trim($_POST['position']); // Get position from form
 
-    if (!preg_match('/^[a-zA-Z\s]+$/', $admin_name)) {
+    if (!preg_match('/^[a-zA-ZáéíóúñäëïöüàèìòùÁÉÍÓÚÑÄËÏÖÜÀÈÌÒÙ\s\-\']+$/', $admin_name)) {
         $_SESSION['swal'] = [
             'icon' => 'error',
             'title' => 'Error!',
-            'text' => 'Full name should only contain letters and spaces'
+            'text' => 'Full name should only contain letters, spaces, hyphens, or apostrophes'
         ];
         header("Location: admin.php");
         exit();
@@ -102,7 +102,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             'text' => 'Full name already exists'
         ];
         $stmt->close();
-        $conn->close();
         header("Location: admin.php");
         exit();
     }
@@ -120,7 +119,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             'text' => 'Username or email already exists'
         ];
         $stmt->close();
-        $conn->close();
         header("Location: admin.php");
         exit();
     }
@@ -163,7 +161,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
     
     $stmt->close();
-    $conn->close();
     header("Location: admin.php");
     exit();
 }

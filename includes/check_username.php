@@ -23,7 +23,6 @@ if (isset($_GET['username'])) {
     ]);
 
     $stmt->close();
-    $conn->close();
 } else {
     echo json_encode([
         'exists' => false

@@ -4,7 +4,7 @@
  * Tests if .htaccess compression and caching are working
  * 
  * Run with: php tests/verify_htaccess.php
- * Or access via browser: https://localhost/caps2/tests/verify_htaccess.php
+ * Or access via browser: https://localhost/pmoc/tests/verify_htaccess.php
  */
 
 header('Content-Type: text/html; charset=utf-8');

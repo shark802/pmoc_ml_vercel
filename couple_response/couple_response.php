@@ -165,7 +165,6 @@ function getResponseClass($response) {
             } catch (Exception $e) {
                 echo '<div class="alert alert-danger">Error loading data: '.htmlspecialchars($e->getMessage()).'</div>';
             }
-            $conn->close();
 
             // Compute totals based on unique questions and sub-questions
             $totalQuestions = 0;
