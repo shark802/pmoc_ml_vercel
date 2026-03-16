@@ -8,8 +8,8 @@
 define('ML_AUTO_ANALYSIS_ENABLED', true);  // Set to false to disable automatic analysis
 
 // ML Service Settings - Auto-detect localhost vs production
-// Heroku Flask Service Endpoint
-$heroku_endpoint = 'https://endpoint-pmoc-a0a6708d039f.herokuapp.com';
+// Production: Vercel Flask Service
+$ml_production_url = 'https://pmoc-ml-vercel.vercel.app';
 
 // Check if running on localhost (development) or production
 $is_production = (
@@ -18,8 +18,8 @@ $is_production = (
 );
 
 if ($is_production) {
-    // Production - use Heroku service
-    define('ML_SERVICE_URL', $heroku_endpoint);
+    // Production - use Vercel ML service
+    define('ML_SERVICE_URL', $ml_production_url);
 } else {
     // Local development - use local Flask service
     define('ML_SERVICE_URL', 'http://127.0.0.1:5000');

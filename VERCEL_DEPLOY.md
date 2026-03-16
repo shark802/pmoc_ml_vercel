@@ -53,4 +53,4 @@ vercel dev
 - `POST /train` – Start training (on Vercel: in-memory only, not persisted)  
 - `GET /training_status` – Training progress  
 
-After deploy, use: `https://<your-project>.vercel.app/health`
+After deploy, use: `https://pmoc-ml-vercel.vercel.app/health`
