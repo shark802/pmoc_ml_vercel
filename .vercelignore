@@ -1,0 +1,16 @@
+# Dependencies installed by Vercel from requirements.txt
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.python-version
+
+# Local / IDE
+.idea/
+.vscode/
+*.log
+*.tmp
+
+# Keep .pkl model files so /analyze works (do not ignore them)
+# If you need to reduce deploy size, train elsewhere and commit only the 3 .pkl files

@@ -1,0 +1,13 @@
+[project]
+name = "pmoc-ml"
+version = "1.0.0"
+description = "ML Service for Couple Counseling Recommendations (MEAI)"
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.scripts]
+app = "service:app"
+
+[tool.vercel]
+# Tell Vercel to use the Flask app from service.py
+# Build runs: pip install -r requirements.txt (via vercel.json buildCommand)
