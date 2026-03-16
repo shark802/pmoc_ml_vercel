@@ -188,9 +188,17 @@ try {
         }
     }
 
-    // Validate contact number
-    if (!preg_match('/^[0-9]{11}$/', $data['contact_number'])) {
-        throw new Exception('Invalid contact number format (11 digits required)', 400);
+    // Validate contact number based on residency type
+    if ($data['residency_type'] === 'foreigner') {
+        // For foreigners: allow 10-15 digits (international formats)
+        if (!preg_match('/^[0-9]{10,15}$/', $data['contact_number'])) {
+            throw new Exception('Invalid contact number format (10-15 digits required for international numbers)', 400);
+        }
+    } else {
+        // For Philippine residents: require 11 digits starting with 09
+        if (!preg_match('/^09[0-9]{9}$/', $data['contact_number'])) {
+            throw new Exception('Invalid contact number format (11 digits starting with 09 required)', 400);
+        }
     }
 
     // Validate email (optional field - only validate format if provided)
@@ -331,7 +339,7 @@ try {
         // Create new address for foreigners
         $addressInsert = $conn->prepare("
             INSERT INTO address (country, state_province, city, barangay, purok) 
-            VALUES (?, ?, ?, NULL, NULL)
+            VALUES (?, ?, ?, 'N/A', 'N/A')
         ");
         $addressInsert->bind_param("sss", $data['foreigner_country'], $data['foreigner_state'], $data['foreigner_city']);
         if (!$addressInsert->execute()) {
