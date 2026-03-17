@@ -9,6 +9,7 @@ import os
 import json
 import pickle
 import threading
+import sys
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
@@ -19,6 +20,15 @@ from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_sc
 from sklearn.metrics import accuracy_score, mean_squared_error
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.utils import class_weight
+
+# Ensure UTF-8 output on Windows consoles to avoid UnicodeEncodeError on emojis/symbols
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # Import imbalanced-learn with error handling
 try:
@@ -576,15 +586,24 @@ def load_questions_from_db():
         
     except Exception as e:
         print(f"Error loading questions from database: {e}")
-        # Fallback: create basic structure
-        MEAI_QUESTIONS = {
-            1: {1: {'text': 'Marriage and Relationship Question', 'sub_questions': []}},
-            2: {2: {'text': 'Responsible Parenthood Question', 'sub_questions': []}},
-            3: {3: {'text': 'Planning The Family Question', 'sub_questions': []}},
-            4: {4: {'text': 'Maternal Neonatal Child Health Question', 'sub_questions': []}}
-        }
-        MEAI_QUESTION_MAPPING = {1: 1, 2: 2, 3: 3, 4: 4}
-        print("Using fallback question structure")
+        # Fallback: create a 59-question structure to match ML feature expectations
+        # Distribution across 4 categories: 15, 15, 15, 14 = 59 total
+        MEAI_QUESTIONS = {}
+        MEAI_QUESTION_MAPPING = {}
+        fallback_counts = {1: 15, 2: 15, 3: 15, 4: 14}
+        question_counter = 1
+
+        for cat_id, count in fallback_counts.items():
+            MEAI_QUESTIONS[cat_id] = {}
+            for q_idx in range(1, count + 1):
+                MEAI_QUESTIONS[cat_id][q_idx] = {
+                    'text': f'Fallback Question {cat_id}.{q_idx}',
+                    'sub_questions': []
+                }
+                MEAI_QUESTION_MAPPING[question_counter] = cat_id
+                question_counter += 1
+
+        print("Using fallback question structure (59 questions total)")
         return False
 
 def generate_synthetic_data_based_on_real_couples(num_couples, real_couples_data):
@@ -1800,7 +1819,7 @@ def train_ml_models():
         risk_param_grid,
         cv=5,
         scoring='accuracy',
-        n_jobs=-1,
+        n_jobs=1,
         verbose=1
     )
     
@@ -1833,7 +1852,7 @@ def train_ml_models():
         category_param_grid,
         cv=5,
         scoring='neg_mean_squared_error',
-        n_jobs=-1,
+        n_jobs=1,
         verbose=1
     )
     
@@ -2572,6 +2591,31 @@ def analyze():
                 else:
                     expected_features = None
                     print(f"WARNING - Model does not have n_features_in_, n_features_, or best_estimator_ attributes")
+
+            actual_features = features_array.shape[1]
+            if expected_features is not None and actual_features != expected_features:
+                error_msg = (
+                    f"Risk model feature count mismatch: Model expects {expected_features} features, "
+                    f"but received {actual_features} features. "
+                    f"This usually means the model was trained with a different feature set. "
+                    f"Please retrain the model using the 'Train Models' button in the dashboard."
+                )
+                print(f"ERROR - {error_msg}")
+                return jsonify({
+                    'status': 'error',
+                    'message': error_msg,
+                    'details': {
+                        'expected_features': int(expected_features),
+                        'actual_features': int(actual_features),
+                        'feature_breakdown': {
+                            'demographic': 11,
+                            'male_responses': len(male_responses),
+                            'female_responses': len(female_responses),
+                            'personalized': 6,
+                            'total': len(features)
+                        }
+                    }
+                }), 400
         else:
             print(f"ERROR - Risk model is None, cannot validate feature count")
             expected_features = None
@@ -2685,16 +2729,20 @@ def analyze():
                 if 'features' in error_msg.lower() and 'expecting' in error_msg.lower():
                     # Extract expected and actual feature counts from error message if possible
                     print(f"ERROR - Prediction failed: {error_msg}")
+                    actual_features = int(features_array.shape[1])
+                    expected_feature_count = 135  # 11 demographic + 118 responses + 6 personalized
                     return jsonify({
                         'status': 'error',
                         'message': (
                             f"Model prediction failed: {error_msg}. "
-                            f"This usually means the model was trained with a different feature set. "
-                            f"Please retrain the model using the 'Train Models' button in the dashboard."
+                            f"This request sent {actual_features} features (should be {expected_feature_count}). "
+                            f"Your loaded model was trained with a different feature set. "
+                            f"Please retrain the model using the 'Train Models' button in the dashboard so it expects "
+                            f"{expected_feature_count} features."
                         ),
                         'details': {
                             'error': error_msg,
-                            'actual_features': int(features_array.shape[1]),
+                            'actual_features': actual_features,
                             'feature_breakdown': {
                                 'demographic': 11,
                                 'male_responses': len(male_responses),

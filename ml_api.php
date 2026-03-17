@@ -38,7 +38,7 @@ header('Content-Type: application/json');
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 // For API calls, skip session handling completely
-if (in_array($action, ['status', 'analyze', 'get_analysis', 'analyze_batch', 'train', 'training_status', 'test', 'start_service'])) {
+if (in_array($action, ['status', 'analyze', 'get_analysis', 'get_all_analyses', 'analyze_batch', 'train', 'training_status', 'test', 'start_service'])) {
     // API calls - no session required
     require_once __DIR__ . '/../includes/conn.php';
     require_once __DIR__ . '/ml_config.php';
@@ -56,6 +56,9 @@ switch($action) {
         break;
     case 'get_analysis':
         get_existing_analysis();
+        break;
+    case 'get_all_analyses':
+        get_all_analyses();
         break;
     case 'analyze_batch':
         debug_log("ml_api.php - Routing to analyze_batch()");
@@ -1526,399 +1529,167 @@ function get_existing_analysis() {
     }
 }
 
-function analyze_batch() {
-    // ============================================
-    // CRITICAL DEBUG: Function entry point
-    // ============================================
-    $log_file = __DIR__ . '/analyze_batch_debug.log';
-    $log_msg = "[" . date('Y-m-d H:i:s') . "] analyze_batch() FUNCTION CALLED\n";
-    file_put_contents($log_file, $log_msg, FILE_APPEND);
-    
-    error_log("=========================================");
-    error_log("DEBUG - analyze_batch() FUNCTION CALLED");
-    error_log("DEBUG - Time: " . date('Y-m-d H:i:s'));
-    error_log("DEBUG - Error log location: " . ini_get('error_log'));
-    error_log("=========================================");
-    
+function get_all_analyses() {
     try {
-        // Get list of access_ids to analyze
-        $access_ids = $_POST['access_ids'] ?? null;
-        
-        error_log("DEBUG - analyze_batch - Received access_ids: " . ($access_ids ? 'YES' : 'NO'));
-        if ($access_ids) {
-            error_log("DEBUG - analyze_batch - access_ids type: " . gettype($access_ids));
-            if (is_string($access_ids)) {
-                error_log("DEBUG - analyze_batch - access_ids is string, length: " . strlen($access_ids));
+        global $conn;
+
+        // Single query: fetch all analysis rows + personalized features in one shot
+        $stmt = $conn->prepare("
+            SELECT 
+                a.access_id,
+                a.risk_level,
+                a.ml_confidence,
+                a.category_scores,
+                a.focus_categories,
+                a.recommendations,
+                a.analysis_method,
+                CONVERT_TZ(a.generated_at, @@session.time_zone, '+08:00') as generated_at,
+                CONVERT_TZ(a.updated_at, @@session.time_zone, '+08:00') as updated_at
+            FROM ml_analysis a
+        ");
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $analyses = [];
+        while ($row = $result->fetch_assoc()) {
+            $analyses[$row['access_id']] = [
+                'analyzed'        => true,
+                'risk_level'      => $row['risk_level'],
+                'ml_confidence'   => (float)$row['ml_confidence'],
+                'category_scores' => json_decode($row['category_scores'], true),
+                'focus_categories'=> json_decode($row['focus_categories'], true),
+                'recommendations' => json_decode($row['recommendations'], true),
+                'analysis_method' => $row['analysis_method'],
+                'generated_at'    => $row['generated_at'],
+                'updated_at'      => $row['updated_at'],
+            ];
+        }
+
+        // Batch-fetch personalized features for all analyzed couples in one query
+        if (!empty($analyses)) {
+            $ids = array_keys($analyses);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $types = str_repeat('s', count($ids));
+
+            $pfStmt = $conn->prepare("
+                SELECT access_id, respondent, response
+                FROM couple_responses
+                WHERE access_id IN ($placeholders)
+                ORDER BY access_id, respondent, question_id
+            ");
+            $pfStmt->bind_param($types, ...$ids);
+            $pfStmt->execute();
+            $pfResult = $pfStmt->get_result();
+
+            // Group responses by access_id
+            $responsesByCouple = [];
+            while ($r = $pfResult->fetch_assoc()) {
+                $aid = $r['access_id'];
+                if (!isset($responsesByCouple[$aid])) {
+                    $responsesByCouple[$aid] = ['male' => [], 'female' => []];
+                }
+                $val = 3;
+                if (is_numeric($r['response'])) {
+                    $val = (int)$r['response'];
+                } else {
+                    $lower = strtolower($r['response']);
+                    if (strpos($lower, 'disagree') !== false) $val = 2;
+                    elseif (strpos($lower, 'agree') !== false) $val = 4;
+                }
+                $gender = strtolower($r['respondent']) === 'male' ? 'male' : 'female';
+                $responsesByCouple[$aid][$gender][] = $val;
+            }
+
+            // Calculate personalized features per couple
+            foreach ($responsesByCouple as $aid => $resp) {
+                if (!isset($analyses[$aid])) continue;
+                $all = array_merge($resp['male'], $resp['female']);
+                $pf = calculate_personalized_features($resp['male'], $resp['female'], $all);
+                $conflict_ratio = $pf['conflict_ratio'] ?? 0.0;
+                $actual_risk = 'Low';
+                if ($conflict_ratio > 0.35) $actual_risk = 'High';
+                elseif ($conflict_ratio > 0.20) $actual_risk = 'Medium';
+
+                $analyses[$aid]['alignment_score']      = $pf['alignment_score'];
+                $analyses[$aid]['conflict_ratio']        = $conflict_ratio;
+                $analyses[$aid]['actual_risk_level']     = $actual_risk;
+                $analyses[$aid]['actual_disagree_ratio'] = $conflict_ratio;
             }
         }
-        
+
+        echo json_encode(['status' => 'success', 'analyses' => $analyses]);
+
+    } catch (Exception $e) {
+        error_log("get_all_analyses error: " . $e->getMessage());
+        echo json_encode(['status' => 'error', 'message' => 'Failed to fetch analyses: ' . $e->getMessage()]);
+    }
+}
+
+function analyze_batch() {
+    set_time_limit(0);
+    try {
+        $access_ids = $_POST['access_ids'] ?? null;
+
         if (!$access_ids) {
-            error_log("ERROR - analyze_batch - No access_ids provided");
             echo json_encode(['status' => 'error', 'message' => 'access_ids required']);
             return;
         }
-        
-        // If it's a JSON string, decode it
+
         if (is_string($access_ids)) {
             $access_ids = json_decode($access_ids, true);
-            error_log("DEBUG - analyze_batch - Decoded JSON, got " . count($access_ids ?? []) . " access_ids");
         }
-        
+
         $results = [
-            'total' => count($access_ids),
+            'total'   => count($access_ids),
             'success' => 0,
-            'failed' => 0,
+            'failed'  => 0,
             'skipped' => 0,
-            'errors' => []
+            'errors'  => []
         ];
-        
-        error_log("DEBUG - analyze_batch - Processing " . count($access_ids) . " couples");
         
         foreach ($access_ids as $access_id) {
             try {
-                error_log("DEBUG - analyze_batch - ===== Processing couple: $access_id =====");
-                
-                // Get couple data
                 $couple_data = get_couple_data($access_id);
-                
+
                 if (!$couple_data) {
                     $results['failed']++;
                     $results['errors'][] = "Couple $access_id not found";
                     continue;
                 }
-                
-                // CRITICAL DEBUG: Check what get_couple_data() returned
-                error_log("DEBUG - analyze_batch - Couple $access_id: get_couple_data() returned");
-                error_log("DEBUG -   couple_data keys: " . json_encode(array_keys($couple_data)));
-                error_log("DEBUG -   Has 'male_responses': " . (isset($couple_data['male_responses']) ? 'YES (' . count($couple_data['male_responses']) . ' items)' : 'NO'));
-                error_log("DEBUG -   Has 'female_responses': " . (isset($couple_data['female_responses']) ? 'YES (' . count($couple_data['female_responses']) . ' items)' : 'NO'));
-                
-                // CRITICAL: Detailed check of arrays
-                $male_check_isset = isset($couple_data['male_responses']);
-                $male_check_is_array = isset($couple_data['male_responses']) && is_array($couple_data['male_responses']);
-                $male_check_count = isset($couple_data['male_responses']) && is_array($couple_data['male_responses']) ? count($couple_data['male_responses']) : 0;
-                $male_check_type = isset($couple_data['male_responses']) ? gettype($couple_data['male_responses']) : 'NOT SET';
-                
-                error_log("DEBUG - analyze_batch - Male responses check:");
-                error_log("DEBUG -   isset: " . ($male_check_isset ? 'YES' : 'NO'));
-                error_log("DEBUG -   is_array: " . ($male_check_is_array ? 'YES' : 'NO'));
-                error_log("DEBUG -   count: $male_check_count");
-                error_log("DEBUG -   type: $male_check_type");
-                if ($male_check_isset && $male_check_is_array && $male_check_count > 0) {
-                    error_log("DEBUG -   first 3 values: " . json_encode(array_slice($couple_data['male_responses'], 0, 3)));
-                }
-                
-                // CRITICAL: Check if arrays exist and are not empty BEFORE building analysis_data
-                // Use explicit checks: isset, is_array, and count > 0
-                if (!$male_check_isset || !$male_check_is_array || $male_check_count == 0) {
-                    error_log("ERROR - analyze_batch - Couple $access_id: male_responses is missing or empty!");
-                    error_log("ERROR -   male_responses exists: " . (isset($couple_data['male_responses']) ? 'YES' : 'NO'));
-                    error_log("ERROR -   male_responses count: " . (isset($couple_data['male_responses']) ? count($couple_data['male_responses']) : 'N/A'));
-                    
-                    // Check if couple has any questionnaire data at all
-                    $has_questionnaire = isset($couple_data['questionnaire_responses']) && !empty($couple_data['questionnaire_responses']) && count($couple_data['questionnaire_responses']) > 0;
-                    
+
+                $male_responses   = (isset($couple_data['male_responses'])   && is_array($couple_data['male_responses']))   ? array_values($couple_data['male_responses'])   : [];
+                $female_responses = (isset($couple_data['female_responses']) && is_array($couple_data['female_responses'])) ? array_values($couple_data['female_responses']) : [];
+
+                if (count($male_responses) === 0 || count($female_responses) === 0) {
+                    $has_questionnaire = !empty($couple_data['questionnaire_responses']);
                     if ($has_questionnaire) {
-                        // Has questionnaire but not separated by gender - this is a data issue
-                        error_log("WARNING - Couple $access_id has questionnaire_responses but not male_responses - respondent field may be missing or incorrect");
                         $results['failed']++;
-                        $results['errors'][] = "Couple $access_id: male_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"male\". Check that the respondent field is set correctly in the database.";
+                        $results['errors'][] = "Couple $access_id: male/female responses missing (check respondent field in couple_responses table)";
                     } else {
-                        // No questionnaire data at all - skip silently or with info message
-                        error_log("INFO - Couple $access_id: No questionnaire responses found. Skipping analysis.");
                         $results['skipped']++;
-                        continue; // Skip this couple without adding to errors
                     }
                     continue;
                 }
-                
-                // CRITICAL: Detailed check of female arrays
-                $female_check_isset = isset($couple_data['female_responses']);
-                $female_check_empty = empty($couple_data['female_responses']);
-                $female_check_count = isset($couple_data['female_responses']) ? count($couple_data['female_responses']) : 0;
-                $female_check_type = isset($couple_data['female_responses']) ? gettype($couple_data['female_responses']) : 'NOT SET';
-                
-                error_log("DEBUG - analyze_batch - Female responses check:");
-                error_log("DEBUG -   isset: " . ($female_check_isset ? 'YES' : 'NO'));
-                error_log("DEBUG -   empty(): " . ($female_check_empty ? 'YES' : 'NO'));
-                error_log("DEBUG -   count: $female_check_count");
-                error_log("DEBUG -   type: $female_check_type");
-                
-                if (!isset($couple_data['female_responses']) || !is_array($couple_data['female_responses']) || count($couple_data['female_responses']) == 0) {
-                    error_log("ERROR - analyze_batch - Couple $access_id: female_responses is missing or empty!");
-                    error_log("ERROR -   female_responses exists: " . (isset($couple_data['female_responses']) ? 'YES' : 'NO'));
-                    error_log("ERROR -   female_responses count: " . (isset($couple_data['female_responses']) ? count($couple_data['female_responses']) : 'N/A'));
-                    
-                    // Check if couple has any questionnaire data at all
-                    $has_questionnaire = isset($couple_data['questionnaire_responses']) && !empty($couple_data['questionnaire_responses']) && count($couple_data['questionnaire_responses']) > 0;
-                    
-                    if ($has_questionnaire) {
-                        // Has questionnaire but not separated by gender - this is a data issue
-                        error_log("WARNING - Couple $access_id has questionnaire_responses but not female_responses - respondent field may be missing or incorrect");
-                        $results['failed']++;
-                        $results['errors'][] = "Couple $access_id: female_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"female\". Check that the respondent field is set correctly in the database.";
-                    } else {
-                        // No questionnaire data at all - skip silently or with info message
-                        error_log("INFO - Couple $access_id: No questionnaire responses found. Skipping analysis.");
-                        $results['skipped']++;
-                        continue; // Skip this couple without adding to errors
-                    }
-                    continue;
-                }
-                
-                // Validate array lengths (should be 59)
-                $expected_count = 59; // Expected number of answerable questions
-                if (count($couple_data['male_responses']) != $expected_count) {
-                    error_log("WARNING - analyze_batch - Couple $access_id: male_responses has " . count($couple_data['male_responses']) . " items, expected $expected_count");
-                }
-                if (count($couple_data['female_responses']) != $expected_count) {
-                    error_log("WARNING - analyze_batch - Couple $access_id: female_responses has " . count($couple_data['female_responses']) . " items, expected $expected_count");
-                }
-                
-                // Prepare data for ML analysis
-                // CRITICAL: Must include male_responses and female_responses from respondent field
-                // Store arrays in variables first to ensure they're not lost
-                // CRITICAL: Direct extraction with explicit checks
-                if (!isset($couple_data['male_responses']) || !is_array($couple_data['male_responses'])) {
-                    error_log("FATAL ERROR - analyze_batch - Couple $access_id: male_responses is not set or not an array in couple_data!");
-                    error_log("FATAL ERROR - couple_data keys: " . json_encode(array_keys($couple_data)));
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: male_responses is missing from couple_data. This should never happen if get_couple_data() worked correctly.";
-                    continue;
-                }
-                if (!isset($couple_data['female_responses']) || !is_array($couple_data['female_responses'])) {
-                    error_log("FATAL ERROR - analyze_batch - Couple $access_id: female_responses is not set or not an array in couple_data!");
-                    error_log("FATAL ERROR - couple_data keys: " . json_encode(array_keys($couple_data)));
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: female_responses is missing from couple_data. This should never happen if get_couple_data() worked correctly.";
-                    continue;
-                }
-                
-                // CRITICAL: Extract arrays directly - use array_values() to ensure it's a proper indexed array
-                $male_resp_array = array_values($couple_data['male_responses']);
-                $female_resp_array = array_values($couple_data['female_responses']);
-                
-                error_log("DEBUG - analyze_batch - Extracted arrays before building analysis_data:");
-                error_log("DEBUG -   male_resp_array type: " . gettype($male_resp_array) . ", count: " . count($male_resp_array));
-                error_log("DEBUG -   female_resp_array type: " . gettype($female_resp_array) . ", count: " . count($female_resp_array));
-                error_log("DEBUG -   male_resp_array first 3: " . json_encode(array_slice($male_resp_array, 0, 3)));
-                error_log("DEBUG -   female_resp_array first 3: " . json_encode(array_slice($female_resp_array, 0, 3)));
-                
-                // CRITICAL: Verify arrays are not empty after extraction
-                if (count($male_resp_array) == 0) {
-                    error_log("FATAL ERROR - analyze_batch - Couple $access_id: male_resp_array is EMPTY after extraction!");
-                    error_log("FATAL ERROR - Original couple_data['male_responses'] count: " . count($couple_data['male_responses']));
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: male_responses array became empty during extraction.";
-                    continue;
-                }
-                if (count($female_resp_array) == 0) {
-                    error_log("FATAL ERROR - analyze_batch - Couple $access_id: female_resp_array is EMPTY after extraction!");
-                    error_log("FATAL ERROR - Original couple_data['female_responses'] count: " . count($couple_data['female_responses']));
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: female_responses array became empty during extraction.";
-                    continue;
-                }
-                
-                $analysis_data = [
-                    'access_id' => $access_id,
-                    'male_age' => $couple_data['male_age'],
-                    'female_age' => $couple_data['female_age'],
-                    'civil_status' => $couple_data['civil_status'] ?? 'Single',
-                    'years_living_together' => $couple_data['years_living_together'] ?? 0,
-                    // REMOVED: past_children, children (features removed from ML model)
-                    'education_level' => $couple_data['education_level'],
-                    'income_level' => $couple_data['income_level'],
-                    'employment_status' => $couple_data['employment_status'] ?? 'Unemployed',  // NEW: Employment status
-                    'questionnaire_responses' => $couple_data['questionnaire_responses'] ?? [],
-                    // CRITICAL: Must include male_responses and female_responses from respondent field
-                    'male_responses' => $male_resp_array,  // Use variable to ensure it's included
-                    'female_responses' => $female_resp_array,  // Use variable to ensure it's included
-                    'personalized_features' => $couple_data['personalized_features'] ?? []
-                ];
-                
-                // CRITICAL: Immediately verify arrays are in analysis_data
-                error_log("DEBUG - analyze_batch - Immediately after building analysis_data:");
-                error_log("DEBUG -   analysis_data keys: " . json_encode(array_keys($analysis_data)));
-                error_log("DEBUG -   male_responses in analysis_data: " . (isset($analysis_data['male_responses']) ? 'YES (' . count($analysis_data['male_responses']) . ' items)' : 'NO'));
-                error_log("DEBUG -   female_responses in analysis_data: " . (isset($analysis_data['female_responses']) ? 'YES (' . count($analysis_data['female_responses']) . ' items)' : 'NO'));
-                
-                // CRITICAL: If arrays are missing, force add them
-                if (!isset($analysis_data['male_responses']) || empty($analysis_data['male_responses'])) {
-                    error_log("CRITICAL - analyze_batch - male_responses missing from analysis_data, forcing it back in");
-                    $analysis_data['male_responses'] = $male_resp_array;
-                }
-                if (!isset($analysis_data['female_responses']) || empty($analysis_data['female_responses'])) {
-                    error_log("CRITICAL - analyze_batch - female_responses missing from analysis_data, forcing it back in");
-                    $analysis_data['female_responses'] = $female_resp_array;
-                }
-                
-                // FINAL VERIFICATION: Double-check arrays are in analysis_data
-                if (!isset($analysis_data['male_responses']) || empty($analysis_data['male_responses']) || count($analysis_data['male_responses']) == 0) {
-                    error_log("CRITICAL ERROR - analyze_batch - Couple $access_id: male_responses is STILL empty after adding to analysis_data!");
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: male_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"male\".";
-                    continue;
-                }
-                
-                if (!isset($analysis_data['female_responses']) || empty($analysis_data['female_responses']) || count($analysis_data['female_responses']) == 0) {
-                    error_log("CRITICAL ERROR - analyze_batch - Couple $access_id: female_responses is STILL empty after adding to analysis_data!");
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: female_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"female\".";
-                    continue;
-                }
-                
-                error_log("DEBUG - analyze_batch - Couple $access_id: Ready to send - male_responses=" . count($analysis_data['male_responses']) . ", female_responses=" . count($analysis_data['female_responses']));
-                
-                // CRITICAL: Final verification before sending
-                error_log("DEBUG - analyze_batch - Final check before call_flask_service:");
-                error_log("DEBUG -   analysis_data keys: " . json_encode(array_keys($analysis_data)));
-                error_log("DEBUG -   male_responses in analysis_data: " . (isset($analysis_data['male_responses']) ? 'YES (' . count($analysis_data['male_responses']) . ' items)' : 'NO'));
-                error_log("DEBUG -   female_responses in analysis_data: " . (isset($analysis_data['female_responses']) ? 'YES (' . count($analysis_data['female_responses']) . ' items)' : 'NO'));
-                
-                // CRITICAL: Force include arrays even if they seem empty (they shouldn't be at this point)
-                if (!isset($analysis_data['male_responses']) || empty($analysis_data['male_responses'])) {
-                    error_log("CRITICAL ERROR - analyze_batch - male_responses is missing or empty right before sending!");
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: male_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"male\".";
-                    continue;
-                }
-                if (!isset($analysis_data['female_responses']) || empty($analysis_data['female_responses'])) {
-                    error_log("CRITICAL ERROR - analyze_batch - female_responses is missing or empty right before sending!");
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: female_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"female\".";
-                    continue;
-                }
-                
-                // CRITICAL: Verify variables before building data_to_send
-                error_log("DEBUG - analyze_batch - Before building data_to_send:");
-                error_log("DEBUG -   \$male_resp_array type: " . gettype($male_resp_array) . ", count: " . count($male_resp_array));
-                error_log("DEBUG -   \$female_resp_array type: " . gettype($female_resp_array) . ", count: " . count($female_resp_array));
-                error_log("DEBUG -   \$analysis_data['male_responses'] exists: " . (isset($analysis_data['male_responses']) ? 'YES (' . count($analysis_data['male_responses']) . ' items)' : 'NO'));
-                error_log("DEBUG -   \$analysis_data['female_responses'] exists: " . (isset($analysis_data['female_responses']) ? 'YES (' . count($analysis_data['female_responses']) . ' items)' : 'NO'));
-                
-                // CRITICAL: Use arrays directly from couple_data if variables are empty
-                if (empty($male_resp_array) || count($male_resp_array) == 0) {
-                    error_log("WARNING - analyze_batch - \$male_resp_array is empty, using from couple_data");
-                    $male_resp_array = $couple_data['male_responses'] ?? [];
-                }
-                if (empty($female_resp_array) || count($female_resp_array) == 0) {
-                    error_log("WARNING - analyze_batch - \$female_resp_array is empty, using from couple_data");
-                    $female_resp_array = $couple_data['female_responses'] ?? [];
-                }
-                
-                // CRITICAL: Create a copy of analysis_data to ensure arrays aren't lost
-                // Use explicit array copy to ensure arrays are included
-                // CRITICAL: Get arrays directly from couple_data as final fallback
-                $final_male_array = array_values($couple_data['male_responses']);
-                $final_female_array = array_values($couple_data['female_responses']);
-                
-                error_log("DEBUG - analyze_batch - Final arrays from couple_data:");
-                error_log("DEBUG -   final_male_array count: " . count($final_male_array));
-                error_log("DEBUG -   final_female_array count: " . count($final_female_array));
-                
+
                 $data_to_send = [
-                    'access_id' => $analysis_data['access_id'],
-                    'male_age' => $analysis_data['male_age'],
-                    'female_age' => $analysis_data['female_age'],
-                    'civil_status' => $analysis_data['civil_status'],
-                    'years_living_together' => $analysis_data['years_living_together'],
-                    'education_level' => $analysis_data['education_level'],
-                    'income_level' => $analysis_data['income_level'],
-                    'employment_status' => $analysis_data['employment_status'] ?? 'Unemployed',
-                    'questionnaire_responses' => $analysis_data['questionnaire_responses'] ?? [],
-                    // CRITICAL: Use arrays directly from couple_data as final source of truth
-                    'male_responses' => $final_male_array,  // Direct from couple_data
-                    'female_responses' => $final_female_array,  // Direct from couple_data
-                    'personalized_features' => $analysis_data['personalized_features'] ?? []
+                    'access_id'               => $access_id,
+                    'male_age'                => $couple_data['male_age'],
+                    'female_age'              => $couple_data['female_age'],
+                    'civil_status'            => $couple_data['civil_status'] ?? 'Single',
+                    'years_living_together'   => $couple_data['years_living_together'] ?? 0,
+                    'education_level'         => $couple_data['education_level'],
+                    'income_level'            => $couple_data['income_level'],
+                    'employment_status'       => $couple_data['employment_status'] ?? 'Unemployed',
+                    'questionnaire_responses' => $couple_data['questionnaire_responses'] ?? [],
+                    'male_responses'          => $male_responses,
+                    'female_responses'        => $female_responses,
+                    'personalized_features'   => $couple_data['personalized_features'] ?? []
                 ];
-                
-                // CRITICAL: Immediately verify arrays are in data_to_send
-                error_log("DEBUG - analyze_batch - IMMEDIATELY after building data_to_send:");
-                error_log("DEBUG -   data_to_send['male_responses'] count: " . count($data_to_send['male_responses']));
-                error_log("DEBUG -   data_to_send['female_responses'] count: " . count($data_to_send['female_responses']));
-                error_log("DEBUG -   data_to_send['male_responses'] first 3: " . json_encode(array_slice($data_to_send['male_responses'], 0, 3)));
-                error_log("DEBUG -   data_to_send['female_responses'] first 3: " . json_encode(array_slice($data_to_send['female_responses'], 0, 3)));
-                
-                // CRITICAL: Verify arrays are actually in data_to_send
-                error_log("DEBUG - analyze_batch - After building data_to_send:");
-                error_log("DEBUG -   data_to_send keys: " . json_encode(array_keys($data_to_send)));
-                error_log("DEBUG -   male_responses count: " . count($data_to_send['male_responses']));
-                error_log("DEBUG -   female_responses count: " . count($data_to_send['female_responses']));
-                error_log("DEBUG -   male_responses first 5: " . json_encode(array_slice($data_to_send['male_responses'], 0, 5)));
-                error_log("DEBUG -   female_responses first 5: " . json_encode(array_slice($data_to_send['female_responses'], 0, 5)));
-                
-                // CRITICAL: Force include arrays one more time right before sending (safety check)
-                if (!isset($data_to_send['male_responses']) || empty($data_to_send['male_responses']) || count($data_to_send['male_responses']) == 0) {
-                    error_log("CRITICAL - analyze_batch - male_responses missing/empty in data_to_send, forcing from variables");
-                    $data_to_send['male_responses'] = $male_resp_array;
-                    error_log("CRITICAL - Forced male_responses: " . count($male_resp_array) . " items");
-                }
-                if (!isset($data_to_send['female_responses']) || empty($data_to_send['female_responses']) || count($data_to_send['female_responses']) == 0) {
-                    error_log("CRITICAL - analyze_batch - female_responses missing/empty in data_to_send, forcing from variables");
-                    $data_to_send['female_responses'] = $female_resp_array;
-                    error_log("CRITICAL - Forced female_responses: " . count($female_resp_array) . " items");
-                }
-                
-                // FINAL CHECK: Verify data_to_send has arrays with actual data
-                error_log("DEBUG - analyze_batch - FINAL CHECK before call_flask_service:");
-                error_log("DEBUG -   data_to_send keys: " . json_encode(array_keys($data_to_send)));
-                error_log("DEBUG -   male_responses in data_to_send: " . (isset($data_to_send['male_responses']) ? 'YES (' . count($data_to_send['male_responses']) . ' items)' : 'NO'));
-                error_log("DEBUG -   female_responses in data_to_send: " . (isset($data_to_send['female_responses']) ? 'YES (' . count($data_to_send['female_responses']) . ' items)' : 'NO'));
-                
-                // ABSOLUTE FINAL CHECK: If arrays are still empty, abort
-                if (empty($data_to_send['male_responses']) || count($data_to_send['male_responses']) == 0) {
-                    error_log("FATAL ERROR - analyze_batch - male_responses is STILL empty after all fixes!");
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: male_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"male\".";
-                    continue;
-                }
-                if (empty($data_to_send['female_responses']) || count($data_to_send['female_responses']) == 0) {
-                    error_log("FATAL ERROR - analyze_batch - female_responses is STILL empty after all fixes!");
-                    $results['failed']++;
-                    $results['errors'][] = "Couple $access_id: female_responses is required and must not be empty. Data must come from couple_responses table with respondent=\"female\".";
-                    continue;
-                }
-                
-                // CRITICAL: Final check RIGHT BEFORE calling Flask service
-                $log_file = __DIR__ . '/analyze_batch_debug.log';
-                $log_msg = "[" . date('Y-m-d H:i:s') . "] Couple $access_id - RIGHT BEFORE call_flask_service()\n";
-                $log_msg .= "  data_to_send keys: " . json_encode(array_keys($data_to_send)) . "\n";
-                $log_msg .= "  male_responses: " . (isset($data_to_send['male_responses']) ? 'YES (' . count($data_to_send['male_responses']) . ' items)' : 'NO') . "\n";
-                $log_msg .= "  female_responses: " . (isset($data_to_send['female_responses']) ? 'YES (' . count($data_to_send['female_responses']) . ' items)' : 'NO') . "\n";
-                file_put_contents($log_file, $log_msg, FILE_APPEND);
-                
-                error_log("DEBUG - analyze_batch - ===== RIGHT BEFORE call_flask_service() =====");
-                error_log("DEBUG - analyze_batch - Couple $access_id:");
-                error_log("DEBUG -   data_to_send type: " . gettype($data_to_send));
-                error_log("DEBUG -   data_to_send keys: " . json_encode(array_keys($data_to_send)));
-                error_log("DEBUG -   male_responses in data_to_send: " . (isset($data_to_send['male_responses']) ? 'YES' : 'NO'));
-                error_log("DEBUG -   female_responses in data_to_send: " . (isset($data_to_send['female_responses']) ? 'YES' : 'NO'));
-                if (isset($data_to_send['male_responses'])) {
-                    error_log("DEBUG -   male_responses type: " . gettype($data_to_send['male_responses']));
-                    error_log("DEBUG -   male_responses count: " . count($data_to_send['male_responses']));
-                    error_log("DEBUG -   male_responses first 3: " . json_encode(array_slice($data_to_send['male_responses'], 0, 3)));
-                }
-                if (isset($data_to_send['female_responses'])) {
-                    error_log("DEBUG -   female_responses type: " . gettype($data_to_send['female_responses']));
-                    error_log("DEBUG -   female_responses count: " . count($data_to_send['female_responses']));
-                    error_log("DEBUG -   female_responses first 3: " . json_encode(array_slice($data_to_send['female_responses'], 0, 3)));
-                }
-                error_log("DEBUG - analyze_batch - ===== CALLING call_flask_service() NOW =====");
-                
-                // Call Flask service
+
                 $flask_url = get_ml_service_url('analyze');
-                $response = call_flask_service($flask_url, $data_to_send, 'POST');
-                
-                $log_msg = "[" . date('Y-m-d H:i:s') . "] Couple $access_id - AFTER call_flask_service()\n";
-                $log_msg .= "  Response status: " . ($response['status'] ?? 'NOT SET') . "\n";
-                file_put_contents($log_file, $log_msg, FILE_APPEND);
-                
-                error_log("DEBUG - analyze_batch - ===== AFTER call_flask_service() =====");
-                error_log("DEBUG - analyze_batch - Response status: " . ($response['status'] ?? 'NOT SET'));
-                
+                $response  = call_flask_service($flask_url, $data_to_send, 'POST');
+
                 if ($response && isset($response['status']) && $response['status'] === 'success') {
-                    // Save analysis results
                     $save_result = save_analysis_results($access_id, $response);
                     if ($save_result) {
                         $results['success']++;
@@ -1930,20 +1701,20 @@ function analyze_batch() {
                     $results['failed']++;
                     $results['errors'][] = "Couple $access_id: " . ($response['message'] ?? 'Unknown error');
                 }
-                
+
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = "Couple $access_id: " . $e->getMessage();
                 error_log("Batch analysis error for $access_id: " . $e->getMessage());
             }
         }
-        
+
         echo json_encode([
-            'status' => 'success',
+            'status'  => 'success',
             'message' => "Analyzed {$results['success']} of {$results['total']} couples",
             'results' => $results
         ]);
-        
+
     } catch (Exception $e) {
         error_log("Batch analysis error: " . $e->getMessage());
         echo json_encode(['status' => 'error', 'message' => 'Batch analysis failed: ' . $e->getMessage()]);

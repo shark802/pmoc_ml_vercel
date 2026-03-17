@@ -6,12 +6,18 @@ Write-Host "Starting ML Service (MEAI Framework)..." -ForegroundColor Green
 Write-Host "======================================================" -ForegroundColor Green
 
 # Prefer venv inside ml_model if available, otherwise use system Python
-$pythonExePath = Join-Path (Get-Location).Path ".venv\Scripts\python.exe"
+$pythonExePath = Join-Path (Get-Location).Path "venv\Scripts\python.exe"
 if (Test-Path $pythonExePath) {
     Write-Host "[OK] Using virtual environment Python at: $pythonExePath" -ForegroundColor Green
 } else {
-    $pythonExePath = "python"
-    Write-Host "[INFO] Local venv not found at .\\.venv\\Scripts\\python.exe - using system Python" -ForegroundColor Yellow
+    # fallback: try .venv
+    $pythonExePath = Join-Path (Get-Location).Path ".venv\Scripts\python.exe"
+    if (Test-Path $pythonExePath) {
+        Write-Host "[OK] Using virtual environment Python at: $pythonExePath" -ForegroundColor Green
+    } else {
+        $pythonExePath = "python"
+        Write-Host "[INFO] No local venv found - using system Python" -ForegroundColor Yellow
+    }
 }
 
 # Check if Python is available
@@ -39,6 +45,16 @@ if ($LASTEXITCODE -ne 0) {
     & "$pythonExePath" -m pip install -r requirements.txt
 } else {
     Write-Host "[OK] Core ML dependencies available" -ForegroundColor Green
+}
+
+# Set remote DB environment variables so Flask connects to the production DB
+# (local MySQL is missing the question tables needed for training)
+$env:DB_HOST     = "srv1322.hstgr.io"
+$env:DB_USER     = "u520834156_userPmoc"
+$env:DB_NAME     = "u520834156_DBpmoc25"
+if (-not $env:DB_PASSWORD) {
+    $securePass = Read-Host "Enter DB_PASSWORD for remote database" -AsSecureString
+    $env:DB_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass))
 }
 
 # Start the service

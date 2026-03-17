@@ -180,7 +180,6 @@ $(document).ready(function() {
   init();
   
   async function init() {
-    await loadCouples();
     await renderDashboard();
   }
 
@@ -192,7 +191,7 @@ $(document).ready(function() {
 
   async function loadCouples() {
     try {
-    const resp = await fetch('../couple_list/get_couples.php', { credentials: 'same-origin' });
+    const resp = await fetch('../couple_list/get_couples.php?fetch_all=1', { credentials: 'same-origin' });
     const data = await resp.json();
     if (!data.success) throw new Error('Failed to load couples');
     return data.data;
@@ -213,54 +212,38 @@ $(document).ready(function() {
     try {
       // Reset state
       couplesState.length = 0;
-      
-      // Load couples
-      const couples = await loadCouples();
+
+      // Load couples list and ALL analyses in parallel — 2 requests instead of N+1
+      const [couples, allAnalysesResp] = await Promise.all([
+        loadCouples(),
+        fetch('./ml_api.php?action=get_all_analyses', { credentials: 'same-origin' }).then(r => r.json())
+      ]);
       couplesState = couples;
-      
-      // Process each couple
-      const processedCouples = [];
-      
-      for (const couple of couples) {
-        try {
-          const analysis = await getAnalysisResults(couple.access_id);
-          
-          if (analysis.analyzed) {
-            // Couple has been analyzed
-            processedCouples.push({
-              ...couple,
-              analysis: analysis
-            });
-          } else {
-            // Couple not yet analyzed
-            processedCouples.push({
-              ...couple,
-              analysis: null
-            });
-          }
-        } catch (error) {
-          console.error(`Failed to fetch analysis for couple ${couple.access_id}:`, error);
-          // Add couple without analysis
-          processedCouples.push({
-            ...couple,
-            analysis: null
-          });
-        }
-      }
-      
+
+      // Build lookup map from batch response
+      const analysesMap = (allAnalysesResp.status === 'success' && allAnalysesResp.analyses)
+        ? allAnalysesResp.analyses
+        : {};
+
+      // Merge couples with their analysis — no extra requests needed
+      const processedCouples = couples.map(couple => ({
+        ...couple,
+        analysis: analysesMap[couple.access_id] || null
+      }));
+
       // Update filtered couples
       filteredCouples = processedCouples;
-      
+
       // Update summary cards
       updateSummaryCards(processedCouples);
-      
+
       // Render table
       renderTable(processedCouples);
-      
+
       // Hide loading spinner and show table
       loadingSpinner.style.display = 'none';
       recommendationsTableWrapper.style.display = 'block';
-      
+
     } catch (error) {
       console.error('Dashboard error:', error);
       loadingSpinner.innerHTML = '<p class="text-danger">Error loading counseling topics recommendations</p>';
@@ -363,6 +346,9 @@ $(document).ready(function() {
         <td class="text-center">${categoriesHTML}</td>
         <td><small>${generatedAt}</small></td>
         <td class="text-center">
+          <button type="button" class="btn btn-outline-success btn-sm analyze-btn" data-access-id="${couple.access_id}" title="Analyze Couple">
+            <i class="fas fa-microscope mr-1"></i>Analyze
+          </button>
           <a href="./view_ml_recommendations.php?access_id=${couple.access_id}" 
              class="btn btn-outline-primary btn-sm" title="View Details">
             <i class="fas fa-eye mr-1"></i>View
@@ -741,6 +727,63 @@ $(document).ready(function() {
       console.error('Batch analysis error:', error);
     } finally {
       btn.prop('disabled', false).html('<i class="fas fa-sync-alt mr-1"></i>Analyze All Couples');
+    }
+  });
+
+  // Analyze single couple button
+  $('#recommendationsTable').on('click', '.analyze-btn', async function(e) {
+    e.preventDefault();
+    const btn = $(this);
+    const accessId = btn.data('access-id');
+
+    if (!accessId) return;
+
+    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i>Analyzing...');
+
+    try {
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          title: 'Analyzing Couple',
+          html: `<p>Analyzing couple ID: ${accessId}</p><small>This may take a moment.</small>`,
+          allowOutsideClick: false,
+          didOpen: () => {
+            Swal.showLoading();
+          }
+        });
+      }
+
+      const response = await fetch(`./ml_api.php?action=analyze&access_id=${encodeURIComponent(accessId)}`, { credentials: 'same-origin' });
+      const data = await response.json();
+
+      if (data.status === 'success') {
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({
+            icon: 'success',
+            title: 'Analysis Complete',
+            html: '<p>Analysis completed successfully.</p>',
+            showConfirmButton: true
+          }).then(() => {
+            // Refresh the dashboard to show updated analysis
+            location.reload();
+          });
+        } else {
+          location.reload();
+        }
+      } else {
+        throw new Error(data.message || 'Analysis failed');
+      }
+    } catch (error) {
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          icon: 'error',
+          title: 'Analysis Failed',
+          html: `<p>${error.message}</p><br><small>Make sure the Flask service is running.</small>`,
+          showConfirmButton: true
+        });
+      }
+      console.error('Single analysis error:', error);
+    } finally {
+      btn.prop('disabled', false).html('<i class="fas fa-microscope mr-1"></i>Analyze');
     }
   });
 
