@@ -10,7 +10,8 @@ require_once '../includes/conn.php';
 try {
     // Get pagination parameters
     $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-    $perPage = isset($_GET['per_page']) ? min(100, max(1, (int)$_GET['per_page'])) : 50; // Max 100 per page
+    $fetchAll = isset($_GET['fetch_all']) && $_GET['fetch_all'] == '1';
+    $perPage = $fetchAll ? PHP_INT_MAX : (isset($_GET['per_page']) ? min(100, max(1, (int)$_GET['per_page'])) : 50);
     $offset = ($page - 1) * $perPage;
     
     // Get total count

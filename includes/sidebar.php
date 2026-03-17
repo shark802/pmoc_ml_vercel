@@ -47,7 +47,7 @@ require_once __DIR__ . '/image_helper.php';
             </a>
           </li>
           <li class="nav-item">
-            <a href="../ml_model/ml_dashboard.php" class="nav-link <?php echo ($current_page === 'ml_dashboard.php' && $current_dir === 'ml_model') ? 'active' : ''; ?>">
+            <a href="../pmoc_ml_vercel/ml_dashboard.php" class="nav-link <?php echo ($current_page === 'ml_dashboard.php' && $current_dir === 'ml_model') ? 'active' : ''; ?>">
               <i class="nav-icon fas fa-brain"></i>
               <p>ML Recommendations</p>
             </a>
@@ -116,7 +116,7 @@ require_once __DIR__ . '/image_helper.php';
           </li>
           
           <li class="nav-item">
-            <a href="../ml_model/ml_dashboard.php" class="nav-link <?php echo ($current_page === 'ml_dashboard.php' && $current_dir === 'ml_model') ? 'active' : ''; ?>">
+            <a href="../pmoc_ml_vercel/ml_dashboard.php" class="nav-link <?php echo ($current_page === 'ml_dashboard.php' && $current_dir === 'ml_model') ? 'active' : ''; ?>">
               <i class="nav-icon fas fa-brain"></i>
               <p>ML Recommendations</p>
             </a>
